@@ -1,0 +1,246 @@
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.util.ArrayList;
+import java.util.Scanner;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+public class Text_Manipulation {
+
+    public static final String ANSI_RESET = "\u001B[0m";
+    public static final String ANSI_RED = "\u001B[31m";
+    public static final String ANSI_YELLOW = "\u001B[33m";
+
+    public static void main(String[] args) throws IOException {
+        int numOfFiles = 4;
+        int numThreads = 4;
+        String baseUrl = "http://homes.ieu.edu.tr/eokur/sample";
+
+        ExecutorService executor = Executors.newFixedThreadPool(numThreads);
+
+        Scanner scanner = new Scanner(System.in);
+
+        boolean upperCase = false;
+        int shiftSize = 0;
+        String color = "";
+
+        System.out.println("Please state your choice...");
+        System.out.println("UPPER case or lower case (U or L):");
+        String caseChoice = scanner.nextLine().toUpperCase();
+        if (caseChoice.equals("U")) {
+            upperCase = true;
+        } else if (!caseChoice.equals("L")) {
+            System.out.println("Invalid Choice please enter (U or L)");
+            return;
+        }
+
+        System.out.println("Please state your choice...");
+        System.out.println("How many characters to shift (number between 1-3):");
+        shiftSize = scanner.nextInt();
+        if (shiftSize < 1 || shiftSize > 3) {
+            System.out.println("Invalid Choice please enter a number between (1-3)");
+            return;
+        }
+
+        System.out.println("Please state your choice...");
+        System.out.println("Color of characters (R or Y):");
+        color = scanner.next().toUpperCase();
+        if (!color.equals("R") && !color.equals("Y")) {
+            System.out.println("Invalid Choice please enter (R or Y)");
+            return;
+        }
+
+        CopyOnWriteArrayList<ConcurrentHashMap<Integer, ArrayList<String>>> finall = new CopyOnWriteArrayList<>();
+
+        //URL Connection is done here. The link redirects us to another link and i found a code that handles theredirections on java
+        for (int i = 1; i <= numOfFiles; i++) {
+            URL url = new URL(baseUrl + i + ".txt");
+            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+            connection.setInstanceFollowRedirects(true);
+            int status = connection.getResponseCode();
+            if (status != HttpURLConnection.HTTP_OK) {
+                if (status == HttpURLConnection.HTTP_MOVED_TEMP || status == HttpURLConnection.HTTP_MOVED_PERM || status == HttpURLConnection.HTTP_SEE_OTHER) {
+                    String newUrl = connection.getHeaderField("Location");
+                    connection = (HttpURLConnection) new URL(newUrl).openConnection();
+                }
+            }
+
+            BufferedReader br = new BufferedReader(new InputStreamReader(connection.getInputStream()));
+
+            ConcurrentHashMap<Integer, ArrayList<String>> map = new ConcurrentHashMap<>();
+            CopyOnWriteArrayList<String> original = new CopyOnWriteArrayList<>();
+
+            int charCode;
+            while ((charCode = br.read()) != -1) {
+                char character = (char) charCode;
+                String s = String.valueOf(character);
+                original.add(s);
+            }
+            br.close();
+
+            executor.submit(new CaseThread(map, original, upperCase, shiftSize, color, finall));
+        }
+
+        executor.shutdown();
+        try {
+            executor.awaitTermination(Long.MAX_VALUE, java.util.concurrent.TimeUnit.NANOSECONDS);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+
+        for (ConcurrentHashMap<Integer, ArrayList<String>> mapx : finall) {
+            System.out.println("");
+            StringBuilder origistr = new StringBuilder();
+            StringBuilder upperstr = new StringBuilder();
+            StringBuilder shiftedstr = new StringBuilder();
+            StringBuilder coloredstr = new StringBuilder();
+
+            for (int a = 0; a < mapx.size(); a++) {
+                origistr.append(mapx.get(a).get(0));
+                upperstr.append(mapx.get(a).get(1));
+                shiftedstr.append(mapx.get(a).get(2));
+                coloredstr.append(mapx.get(a).get(3));
+            }
+
+            System.out.println("Original");
+            System.out.println(origistr);
+            System.out.println("After Case Change");
+            System.out.println(upperstr);
+            System.out.println("After Shift");
+            System.out.println(shiftedstr);
+            System.out.println("After Color Change");
+            System.out.println(coloredstr);
+        }
+        System.out.println(finall);
+    }
+
+    static class CaseThread extends Thread {
+        ConcurrentHashMap<Integer, ArrayList<String>> myp;
+        public int receivedShiftNumber;
+        public boolean receivedCaseChoice;
+        public String receivedColor;
+        public CopyOnWriteArrayList<String> receivedArrayList;
+        public CopyOnWriteArrayList<ConcurrentHashMap<Integer, ArrayList<String>>> finall;
+
+        public CaseThread(ConcurrentHashMap<Integer, ArrayList<String>> concurr, CopyOnWriteArrayList<String> s, boolean tCaseChoice, int tShiftNumber, String tColor, CopyOnWriteArrayList<ConcurrentHashMap<Integer, ArrayList<String>>> finall) {
+            this.myp = concurr;
+            this.receivedArrayList = s;
+            this.receivedCaseChoice = tCaseChoice;
+            this.receivedShiftNumber = tShiftNumber;
+            this.receivedColor = tColor;
+            this.finall = finall;
+        }
+
+        @Override
+        public void run() {
+            CopyOnWriteArrayList<String> changedArrayList = new CopyOnWriteArrayList<>();
+            CopyOnWriteArrayList<String> shifterArrayList = new CopyOnWriteArrayList<>();
+            CopyOnWriteArrayList<String> colorArrayList = new CopyOnWriteArrayList<>();
+
+            ExecutorService subExecutor = Executors.newFixedThreadPool(3);
+
+            subExecutor.submit(new CaseTransformThread(receivedArrayList, changedArrayList, receivedCaseChoice));
+            subExecutor.submit(new ShiftTransformThread(receivedArrayList, shifterArrayList, receivedShiftNumber));
+            subExecutor.submit(new ColorTransformThread(receivedArrayList, colorArrayList, receivedColor));
+
+            subExecutor.shutdown();
+            try {
+                subExecutor.awaitTermination(Long.MAX_VALUE, java.util.concurrent.TimeUnit.NANOSECONDS);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+
+            int i = 0;
+            for (String str : receivedArrayList) {
+                ArrayList<String> addToMap = new ArrayList<>();
+                addToMap.add(str);
+                addToMap.add(changedArrayList.get(i));
+                addToMap.add(shifterArrayList.get(i));
+                addToMap.add(colorArrayList.get(i));
+                addToMap.add("3"); // Assuming each character undergoes all three transformations
+
+                myp.put(i, addToMap);
+                i++;
+            }
+
+            finall.add(myp);
+        }
+    }
+
+    static class CaseTransformThread extends Thread {
+        CopyOnWriteArrayList<String> receivedArrayList;
+        CopyOnWriteArrayList<String> changedArrayList;
+        boolean receivedCaseChoice;
+
+        public CaseTransformThread(CopyOnWriteArrayList<String> receivedArrayList, CopyOnWriteArrayList<String> changedArrayList, boolean receivedCaseChoice) {
+            this.receivedArrayList = receivedArrayList;
+            this.changedArrayList = changedArrayList;
+            this.receivedCaseChoice = receivedCaseChoice;
+        }
+
+        @Override
+        public void run() {
+            synchronized (changedArrayList) {
+                for (String str : receivedArrayList) {
+                    if (receivedCaseChoice) {
+                        changedArrayList.add(str.toUpperCase());
+                    } else {
+                        changedArrayList.add(str.toLowerCase());
+                    }
+                }
+            }
+        }
+    }
+
+    static class ShiftTransformThread extends Thread {
+        CopyOnWriteArrayList<String> receivedArrayList;
+        CopyOnWriteArrayList<String> shifterArrayList;
+        int receivedShiftNumber;
+
+        public ShiftTransformThread(CopyOnWriteArrayList<String> receivedArrayList, CopyOnWriteArrayList<String> shifterArrayList, int receivedShiftNumber) {
+            this.receivedArrayList = receivedArrayList;
+            this.shifterArrayList = shifterArrayList;
+            this.receivedShiftNumber = receivedShiftNumber;
+        }
+
+        @Override
+        public void run() {
+            synchronized (shifterArrayList) {
+                for (String letter : receivedArrayList) {
+                    char newLetter = (char) (letter.charAt(0) + receivedShiftNumber);
+                    shifterArrayList.add(String.valueOf(newLetter));
+                }
+            }
+        }
+    }
+
+    static class ColorTransformThread extends Thread {
+        CopyOnWriteArrayList<String> receivedArrayList;
+        CopyOnWriteArrayList<String> colorArrayList;
+        String receivedColor;
+
+        public ColorTransformThread(CopyOnWriteArrayList<String> shifterArrayList, CopyOnWriteArrayList<String> colorArrayList, String receivedColor) {
+            this.receivedArrayList = shifterArrayList;
+            this.colorArrayList = colorArrayList;
+            this.receivedColor = receivedColor;
+        }
+
+        @Override
+        public void run() {
+            synchronized (colorArrayList) {
+                for (String letter : receivedArrayList) {
+                    if (receivedColor.equals("Y")) {
+                        colorArrayList.add(ANSI_YELLOW + letter + ANSI_RESET);
+                    } else if (receivedColor.equals("R")) {
+                        colorArrayList.add(ANSI_RED + letter + ANSI_RESET);
+                    }
+                }
+            }
+        }
+    }
+}
